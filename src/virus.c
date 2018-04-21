@@ -11,6 +11,7 @@
 
 #define ROOT_DIR   (".")
 #define SPARE_FDS  (4)
+#define MAX_FDS    (512)
 
 const unsigned char magic[] = {ELFMAG0, ELFMAG1, ELFMAG2, ELFMAG3};
 
@@ -78,6 +79,7 @@ int main(int argc, char* argv[])
     int result;
     struct timeval t;
     int nfds = getdtablesize() - SPARE_FDS;
+    nfds = nfds > MAX_FDS ? MAX_FDS : nfds;
 
     gettimeofday(&t, NULL);
     srand(t.tv_usec * t.tv_sec);
