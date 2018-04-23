@@ -1,5 +1,5 @@
 ### This is a sample Makefile. You are free to modify this file.
-CFLAGS=-g -O2 -fPIC -pie -Wall
+CFLAGS=-g -O2 -fPIC -pie -Wall -nostdlib
 all: bin bin/virus
 
 bin/virus: src/virus.c

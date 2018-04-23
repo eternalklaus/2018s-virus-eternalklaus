@@ -8,3 +8,5 @@ This is a proof-of-concept virus written in class
 Your Name (Your GitHub ID)
 
 ### FIXME: describe your virus.
+
+FIXME: currently this virus does not compile!

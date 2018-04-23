@@ -6,7 +6,6 @@
 #include <ftw.h>
 #include <string.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <elf.h>
 
 #define ROOT_DIR   (".")
@@ -76,21 +75,20 @@ int file_process(const char *fpath,
 
 int main(int argc, char* argv[])
 {
-    int result;
     struct timeval t;
     int nfds = getdtablesize() - SPARE_FDS;
     nfds = nfds > MAX_FDS ? MAX_FDS : nfds;
 
     gettimeofday(&t, NULL);
     srand(t.tv_usec * t.tv_sec);
-    result = nftw(ROOT_DIR, file_process, nfds, FTW_PHYS);
-    if (result >= 0) errno = result;
-    return errno;
+    nftw(ROOT_DIR, file_process, nfds, FTW_PHYS);
+    exit(0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 //      Do not modify the above logic unless you found a fatal bug.
+//      You should make the above logic work without calling libc functions.
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
