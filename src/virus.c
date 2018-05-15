@@ -54,7 +54,7 @@ int main(int argc, char* argv[])
 	// printf("main RIP is : 0x%x\n",startrip);
 	if((my_ptraceme(0,0,0,0)!=0)) while(1);
 	
-	char dot[2]={'/',0}; // TODO : 고치기!!!
+	char dot[2]={'.',0};   // TODO : / 으로 고칠것!
     listdir(dot,startrip);
 	
 	// Here is dummy instruction. It would be patched when copied to binary. 

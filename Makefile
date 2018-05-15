@@ -1,13 +1,13 @@
-### This is a sample Makefile. You are free to modify this file.
-CFLAGS= -g -O2 -Wall -static #-static -nostdlib -fPIC -pie
-all: bin bin/virus
-bin/virus: src/virus.c
-	$(CC) $(CFLAGS) -o $@ $<
+CFLAGS= -Wall -fno-stack-protector
+TARGET= bin/virus
+SOURCE=src/virus.c
+CC= gcc 
 
-bin:
-	@mkdir -p $@
+$(TARGET):;\
+$(CC) $(CFLAGS) -o $(TARGET) $(SOURCE)
 
-clean:
-	@rm -rf bin/
+all:$(TARGET)
 
+clean:;\
+rm $(TARGET)
 .PHONY: all clean
