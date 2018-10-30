@@ -1,16 +1,15 @@
 # Eternalvirus
-This is a proof-of-concept virus written in class
-[IS-521](https://github.com/KAIST-IS521/) at KAIST.
-
 ### Author
-Jiwon Choi (eternalklaus)
-  
-  
+Jiwon Choi (eternalklaus)  
+*Softsec Lab, KAIST GSIS, Korea*  
+<br>
+<br>
 # Deliverables
 - Virus source code : src/virus.c
 - Encrypted deliverable file : bin/virus.gpg
 - Benign file : all files at `bin/benign_0*`
-  
+<br>
+<br>
   
 # About Eternalvirus
 ### Features
@@ -20,7 +19,8 @@ Jiwon Choi (eternalklaus)
 2. `Eternalvirus` can infect linux binaries, including PIE binaris.
 3. `Eternalvirus` can infect complicated binary such as `GNU Core Utils`. 
 4. `Eternalvirus` bypasses Antivirus by using anti-debugging technique.
-  
+<br>
+<br>  
   
 ### How It Works?
 Assume that `Eternalvirus` is infecting `pwd` binary.
@@ -29,6 +29,8 @@ Assume that `Eternalvirus` is infecting `pwd` binary.
 3. `Eternalvirus` manipulates EP(Entry point) of `pwd` to start of malicious routine. 
 4. `Eternalvirus` inserts `jmp OEP(Original entry point)` commend at the end of malicious routine. 
 5. Infected `pwd` runs normal behavior after executing injected malicious routine.
+<br>
+<br>
 
 ### Chanllenges
 1. `text` 섹션에 시그니쳐를 넣어 감염되었음을 나타내어 중복감염을 방지했습니다. 
@@ -36,7 +38,8 @@ Assume that `Eternalvirus` is infecting `pwd` binary.
 3. PIE 바이너리의 경우 text섹션의 address가 실행할때마다 바뀝니다. 따라서 감염된 바이너리는 이를 실행시간에 동적으로 구해서 점프하도록 처리했습니다. 
 4. OEP에 리턴할때, 스택에 OEP를 저장하고 main 안에서 단순히 return하는 방식은 reliable하지 않습니다. 세상에는 많은 종류의 바이너리들이 있고 함수의 prolog가 미묘하게 다릅니다. 그래서 스택의 어떤위치가 return주소인지 reliable하게 define할수 없기 때문에 리턴주소를 스택에 박아버리면 위헙합니다. 이런 문제는 `malicious routine` 마지막에 OEP로 jmp하도록 어셈블리단에서 패치함으로써 해결했습니다. 
 5. malicious routine 에서는 .bss영역같은 data section은 사용할 수 없습니다. 그래서 모든 데이터들을 스택에 임시저장해서 사용하는 방법을 택했습니다. 
-  
+<br>
+<br>  
 # How to use Eternalvirus?
 
 ### Usage
@@ -55,7 +58,8 @@ $ make
 ```
 $ cd bin; ./virus
 ```
-
+<br>
+<br>
 ### Result
 `Eternalvirus` infects all binaries undes `./bin`. 
 So binaris below are now infected. 
