@@ -82,6 +82,7 @@ Infected binaries do three things.
 
 <br>
 <br>
+
 ### Result image
 
 Below images show how the infected binaries runs.
