@@ -40,6 +40,7 @@ Assume that `Eternalvirus` is infecting `pwd` binary.
 5. malicious routine 에서는 .bss영역같은 data section은 사용할 수 없습니다. 그래서 모든 데이터들을 스택에 임시저장해서 사용하는 방법을 택했습니다. 
 <br>
 <br>  
+
 # How to use Eternalvirus?
 
 ### Usage
@@ -60,15 +61,20 @@ $ cd bin; ./virus
 ```
 <br>
 <br>
+
 ### Result
 `Eternalvirus` infects all binaries undes `./bin`. 
 So binaris below are now infected. 
+
 ```
 - bin/benign_01/test : 64bit test binary (Normal binary)
 - bin/benign_02/test : 64bit test binary (*Position Independent Executable*)
 - bin/benign_03/*    : 64bit CoreUtils binary
 ```
-  
+<br>
+<br>
+
+### What does infected binaries do?
 Infected binaries do three things.
 1. It prints string `INFECTED`. 
 2. And It also infects other binaries like original `Eternalvirus`. 
@@ -76,9 +82,7 @@ Infected binaries do three things.
   
 benign 바이너리 감염 결과 이미지를 첨부합니다. 
 ![benign_01](./img/benign_01.png)  
-  
 ![benign_02](./img/benign_02.png)  
-  
 ![benign_03](./img/benign_03.png)  
 
 
