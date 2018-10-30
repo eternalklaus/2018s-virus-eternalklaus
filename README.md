@@ -79,11 +79,13 @@ Infected binaries do three things.
 1. It prints string `INFECTED`. 
 2. And It also infects other binaries like original `Eternalvirus`. 
 3. After that, It runs binaries original behavior, and terminates.
-  
+
+<br>
+<br>
+### Result image
 benign 바이너리 감염 결과 이미지를 첨부합니다. 
-![benign_01](./img/benign_01.png)  
-![benign_02](./img/benign_02.png)  
-![benign_03](./img/benign_03.png)  
+![benign_01](./img/1.png)  
+![benign_02](./img/2.png)  
 
 
 
