@@ -1,5 +1,4 @@
-# eternal virus
-
+# Eternalvirus
 This is a proof-of-concept virus written in class
 [IS-521](https://github.com/KAIST-IS521/) at KAIST.
 
@@ -8,27 +7,28 @@ Jiwon Choi (eternalklaus)
   
   
 # Deliverables
-- 바이러스 소스코드 : src/virus.c
-- 암호화된 바이러스 : bin/virus.gpg
-- benign file : bin/benign_0* 하위의 모든 파일들
+- Virus source code : src/virus.c
+- Encrypted deliverable file : bin/virus.gpg
+- Benign file : all files at `bin/benign_0*`
   
   
-# 바이러스 소개
-### 특장점
-eternal virus는 다음과 같은 장점을 가집니다. 
+# About Eternalvirus
+### Features
+`Eternal virus` has features like below
   
-1. PIE 바이너리도 감염 시킵니다.
-2. CoreUtils와 같은 복잡한 바이너리도 감염 시킵니다. 
-3. 안티 디버깅 기술을 적용하여 Antivirus의 분석을 회피합니다.
+1. `Eternalvirus` runs on x64 linux environment. 
+2. `Eternalvirus` can infect linux binaries, including PIE binaris.
+3. `Eternalvirus` can infect complicated binary such as `GNU Core Utils`. 
+4. `Eternalvirus` bypasses Antivirus by using anti-debugging technique.
   
   
-### 동작 원리
-최초 실행되는 바이러스의 이름은 virus이고, 감염대상 바이너리를 A라고 칭합니다.
-1. virus는 A 의 ELF 헤더의 text섹션 사이즈를 크게 늘립니다. 
-2. virus는 크게 늘어난 A의 코드섹션에 malicious routine을 주입합니다. 
-3. virus는 A 의 Entry Point를 malicious routine의 시작으로 조작합니다. 
-4. virus는 A에 주입된 malicious routine의 끝에 OEP(Original Entry Point)로 점프하는 명령어를 삽입합니다. 
-5. 따라서 감염된 A는 malicious routine 수행후 normal behavior 를 수행하게 됩니다. 
+### How It Works?
+Assume that `Eternalvirus` is infecting `pwd` binary.
+1. `Eternalvirus` expands `<.text>` size of infected binary by manipulating its ELF header. 
+2. `Eternalvirus` injects malicious routine to `pwd`'s expanded `<.text>` section. 
+3. `Eternalvirus` manipulates EP(Entry point) of `pwd` to start of malicious routine. 
+4. `Eternalvirus` inserts `jmp OEP(Original entry point)` commend at the end of malicious routine. 
+5. Infected `pwd` runs normal behavior after executing injected malicious routine.
 
 ### Chanllenges
 1. `text` 섹션에 시그니쳐를 넣어 감염되었음을 나타내어 중복감염을 방지했습니다. 
