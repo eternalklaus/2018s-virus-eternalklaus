@@ -85,6 +85,9 @@ Below images show how the infected binaries runs.
 ![benign_01](./img/1.png)  
 ![benign_02](./img/2.png)  
 
+<br>
 
-
-
+# 5. Enjoy!
+Use this code for educational purpose.
+I developed this code as part of [IS-521](https://github.com/KAIST-IS521/) lesson project.  
+***Please do not use it for malicious purpose!***  
