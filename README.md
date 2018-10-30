@@ -17,9 +17,9 @@
 `Eternal virus` has features like below
   
 1. `Eternalvirus` runs on x64 linux environment. 
-2. `Eternalvirus` can infect linux binaries, including PIE binaris.
-3. `Eternalvirus` can infect complicated binary such as `GNU Core Utils`. 
-4. `Eternalvirus` bypasses Antivirus by using anti-debugging technique.
+2. `Eternalvirus` infects linux binaries, including PIE binaris.
+3. `Eternalvirus` infects complicated binary such as `GNU Core Utils`. 
+4. `Eternalvirus` bypasses detection of antivirus by adopting anti-debugging technique.
 <br>
 
 ### 3.2 How It Works?
