@@ -83,7 +83,9 @@ Infected binaries do three things.
 <br>
 <br>
 ### Result image
-benign 바이너리 감염 결과 이미지를 첨부합니다. 
+
+Below images show how the infected binaries runs.
+
 ![benign_01](./img/1.png)  
 ![benign_02](./img/2.png)  
 
